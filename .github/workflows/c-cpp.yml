@@ -240,23 +240,3 @@ jobs:
       - name: Get Build Variable
         run: echo "Build_Variable=${{ needs.build.outputs.BuildTag }}" >> $GITHUB_ENV
 
-      - name: Upload
-        shell: bash
-        run: |
-          mkdir artifacts/
-          files=$(find . -name "*latest")
-          for f in $files; do
-            if [[ $f == *macos-latest ]]
-            then
-              cp $(basename $f)/$(basename $f).dmg artifacts/macos-latest.dmg
-            else
-              echo "Compressing $f"
-              (cd $(basename $f) && zip -r ../artifacts/$(basename $f  | cut -d "-" -f 3)-latest.zip *)
-            fi
-          done
-          ls -al artifacts/
-          wget -c https://github.com/tcnksm/ghr/releases/download/v0.14.0/ghr_v0.14.0_linux_amd64.tar.gz
-          tar xfv ghr_v0.14.0_linux_amd64.tar.gz
-          ghr_v0.14.0_linux_amd64/ghr -u Vita3K -r Vita3K -recreate -n 'Automatic CI builds' -b "$(printf "Corresponding commit: ${{ github.sha }}\nVita3K Build: ${{ env.Build_Variable }}")" continuous artifacts/
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
