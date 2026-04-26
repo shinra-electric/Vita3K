@@ -21,6 +21,7 @@
 
 #include <app/functions.h>
 #include <audio/state.h>
+#include <bgm_player/functions.h>
 #include <config/state.h>
 #include <ctime>
 #include <ctrl/functions.h>
@@ -603,6 +604,47 @@ bool handle_events(EmuEnvState &emuenv, GuiState &gui) {
     const auto allow_switch_state = !emuenv.io.title_id.empty() && !gui.vita_area.app_close && !gui.vita_area.home_screen && !gui.vita_area.user_management && !gui.configuration_menu.custom_settings_dialog && !gui.configuration_menu.settings_dialog && !gui.controls_menu.controls_dialog && gui::get_sys_apps_state(gui);
 
     const auto ui_navigation = [&emuenv, &gui, allow_switch_state](const uint32_t sce_ctrl_btn) {
+        switch (sce_ctrl_btn) {
+        case SCE_CTRL_CROSS:
+        case SCE_CTRL_CIRCLE:
+            gui.is_key_locked = true;
+            if (gui.vita_area.start_screen)
+                gui::close_start_screen(gui, emuenv);
+            break;
+        case SCE_CTRL_PSBUTTON:
+            gui.is_key_locked = true;
+            if (allow_switch_state) {
+                // Show/Hide Live Area during app running
+                const auto live_area_app_index = gui::get_live_area_current_open_apps_list_index(gui, emuenv.io.app_path);
+                if (live_area_app_index == gui.live_area_current_open_apps_list.end())
+                    gui::open_live_area(gui, emuenv, emuenv.io.app_path);
+                else {
+                    // If current live area app open is not the current app running, set it as current
+                    if ((gui.live_area_app_current_open < 0) || (gui.live_area_current_open_apps_list[gui.live_area_app_current_open] != emuenv.io.app_path))
+                        gui.live_area_app_current_open = static_cast<int32_t>(std::distance(live_area_app_index, gui.live_area_current_open_apps_list.end()) - 1);
+
+                    // Switch Live Area state
+                    if (!gui.vita_area.live_area_screen) {
+                        gui.vita_area.information_bar = true;
+                        gui.vita_area.live_area_screen = true;
+                    }
+                }
+
+                if (!emuenv.kernel.is_threads_paused()) {
+                    // Update the last app frame for live area
+                    update_live_area_last_app_frame(emuenv, gui);
+                    gui.gate_animation.start(GateAnimationState::ReturnApp);
+                    app::switch_state(emuenv, true);
+                    bgm_player::switch_bgm_state(false);
+                } else {
+                    gui.gate_animation.start(GateAnimationState::EnterApp);
+                }
+            } else if (!gui::get_sys_apps_state(gui))
+                gui::close_system_app(gui, emuenv);
+            break;
+        default: break;
+        }
+
         if (gui.vita_area.app_close) {
             const auto cancel = [&gui]() {
                 gui.vita_area.app_close = false;
@@ -643,52 +685,6 @@ bool handle_events(EmuEnvState &emuenv, GuiState &gui) {
             default: break;
             }
         }
-
-        switch (sce_ctrl_btn) {
-        case SCE_CTRL_CROSS:
-        case SCE_CTRL_CIRCLE:
-            gui.is_key_locked = true;
-            if (gui.vita_area.start_screen) {
-                gui.vita_area.start_screen = false;
-                gui.vita_area.home_screen = true;
-                if (emuenv.cfg.show_info_bar)
-                    gui.vita_area.information_bar = true;
-            }
-            break;
-        case SCE_CTRL_PSBUTTON:
-            gui.is_key_locked = true;
-            if (allow_switch_state) {
-                // Show/Hide Live Area during app running
-                const auto current_app_state = emuenv.kernel.is_threads_paused();
-                const auto live_area_app_index = gui::get_live_area_current_open_apps_list_index(gui, emuenv.io.app_path);
-                if (live_area_app_index == gui.live_area_current_open_apps_list.end())
-                    gui::open_live_area(gui, emuenv, emuenv.io.app_path);
-                else {
-                    // If current live area app open is not the current app running, set it as current
-                    if ((gui.live_area_app_current_open < 0) || (gui.live_area_current_open_apps_list[gui.live_area_app_current_open] != emuenv.io.app_path))
-                        gui.live_area_app_current_open = static_cast<int32_t>(std::distance(live_area_app_index, gui.live_area_current_open_apps_list.end()) - 1);
-
-                    // Switch Live Area state
-                    if (!gui.vita_area.live_area_screen) {
-                        gui.vita_area.information_bar = true;
-                        gui.vita_area.live_area_screen = true;
-                    }
-                }
-
-                if (!current_app_state) {
-                    // Update the last app frame for live area
-                    update_live_area_last_app_frame(emuenv, gui);
-                    gui.gate_animation.start(GateAnimationState::ReturnApp);
-                    app::switch_state(emuenv, !current_app_state);
-                    gui::switch_bgm_state(!current_app_state);
-                } else {
-                    gui.gate_animation.start(GateAnimationState::EnterApp);
-                }
-            } else if (!gui::get_sys_apps_state(gui))
-                gui::close_system_app(gui, emuenv);
-            break;
-        default: break;
-        }
     };
 
     // Check if any settings or controls dialog is open and drop inputs on this case
@@ -702,7 +698,7 @@ bool handle_events(EmuEnvState &emuenv, GuiState &gui) {
         ImGui_ImplSdl_ProcessEvent(gui.imgui_state.get(), &event);
         switch (event.type) {
         case SDL_EVENT_QUIT:
-            gui::destroy_bgm_player();
+            bgm_player::destroy_bgm_player();
             if (!emuenv.io.app_path.empty())
                 gui::update_time_app_used(gui, emuenv, emuenv.io.app_path);
             if (emuenv.audio.adapter)
@@ -718,25 +714,25 @@ bool handle_events(EmuEnvState &emuenv, GuiState &gui) {
 
         case SDL_EVENT_KEY_DOWN: {
             const auto get_sce_ctrl_btn_from_scancode = [&emuenv](const SDL_Scancode scancode) {
-                if (scancode == emuenv.cfg.keyboard_button_up)
+                if (scancode == emuenv.cfg.keyboard_button_up || scancode == emuenv.cfg.keyboard_button_up_alt)
                     return SCE_CTRL_UP;
-                else if (scancode == emuenv.cfg.keyboard_button_right)
+                else if (scancode == emuenv.cfg.keyboard_button_right || scancode == emuenv.cfg.keyboard_button_right_alt)
                     return SCE_CTRL_RIGHT;
-                else if (scancode == emuenv.cfg.keyboard_button_down)
+                else if (scancode == emuenv.cfg.keyboard_button_down || scancode == emuenv.cfg.keyboard_button_down_alt)
                     return SCE_CTRL_DOWN;
-                else if (scancode == emuenv.cfg.keyboard_button_left)
+                else if (scancode == emuenv.cfg.keyboard_button_left || scancode == emuenv.cfg.keyboard_button_left_alt)
                     return SCE_CTRL_LEFT;
-                else if (scancode == emuenv.cfg.keyboard_button_l1)
+                else if (scancode == emuenv.cfg.keyboard_button_l1 || scancode == emuenv.cfg.keyboard_button_l1_alt)
                     return SCE_CTRL_L1;
-                else if (scancode == emuenv.cfg.keyboard_button_r1)
+                else if (scancode == emuenv.cfg.keyboard_button_r1 || scancode == emuenv.cfg.keyboard_button_r1_alt)
                     return SCE_CTRL_R1;
-                else if (scancode == emuenv.cfg.keyboard_button_triangle)
+                else if (scancode == emuenv.cfg.keyboard_button_triangle || scancode == emuenv.cfg.keyboard_button_triangle_alt)
                     return SCE_CTRL_TRIANGLE;
-                else if (scancode == emuenv.cfg.keyboard_button_circle)
+                else if (scancode == emuenv.cfg.keyboard_button_circle || scancode == emuenv.cfg.keyboard_button_circle_alt)
                     return SCE_CTRL_CIRCLE;
-                else if (scancode == emuenv.cfg.keyboard_button_cross)
+                else if (scancode == emuenv.cfg.keyboard_button_cross || scancode == emuenv.cfg.keyboard_button_cross_alt)
                     return SCE_CTRL_CROSS;
-                else if (scancode == emuenv.cfg.keyboard_button_psbutton)
+                else if (scancode == emuenv.cfg.keyboard_button_psbutton || scancode == emuenv.cfg.keyboard_button_psbutton_alt)
                     return SCE_CTRL_PSBUTTON;
                 else
                     return static_cast<SceCtrlButtons>(0);
@@ -764,23 +760,23 @@ bool handle_events(EmuEnvState &emuenv, GuiState &gui) {
                 sce_ctrl_btn = SCE_CTRL_PSBUTTON;
 #else
             // toggle gui state
-            if (allow_switch_state && (event.key.scancode == emuenv.cfg.keyboard_gui_toggle_gui))
+            if (allow_switch_state && (event.key.scancode == emuenv.cfg.keyboard_gui_toggle_gui || event.key.scancode == emuenv.cfg.keyboard_gui_toggle_gui_alt))
                 emuenv.display.imgui_render = !emuenv.display.imgui_render;
-            if (event.key.scancode == emuenv.cfg.keyboard_gui_toggle_touch && !gui.is_key_capture_dropped)
+            if ((event.key.scancode == emuenv.cfg.keyboard_gui_toggle_touch || event.key.scancode == emuenv.cfg.keyboard_gui_toggle_touch_alt) && !gui.is_key_capture_dropped)
                 toggle_touchscreen();
-            if (event.key.scancode == emuenv.cfg.keyboard_gui_fullscreen && !gui.is_key_capture_dropped)
+            if ((event.key.scancode == emuenv.cfg.keyboard_gui_fullscreen || event.key.scancode == emuenv.cfg.keyboard_gui_fullscreen_alt) && !gui.is_key_capture_dropped)
                 switch_full_screen(emuenv);
-            if (event.key.scancode == emuenv.cfg.keyboard_toggle_texture_replacement && !gui.is_key_capture_dropped)
+            if ((event.key.scancode == emuenv.cfg.keyboard_toggle_texture_replacement || event.key.scancode == emuenv.cfg.keyboard_toggle_texture_replacement_alt) && !gui.is_key_capture_dropped)
                 toggle_texture_replacement(emuenv);
-            if (event.key.scancode == emuenv.cfg.keyboard_take_screenshot && !gui.is_key_capture_dropped)
+            if ((event.key.scancode == emuenv.cfg.keyboard_take_screenshot || event.key.scancode == emuenv.cfg.keyboard_take_screenshot_alt) && !gui.is_key_capture_dropped)
                 take_screenshot(emuenv);
-            if ((event.key.scancode == emuenv.cfg.keyboard_pinch_modifier || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_in || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_out) && !gui.is_key_capture_dropped)
+            if ((event.key.scancode == emuenv.cfg.keyboard_pinch_modifier || event.key.scancode == emuenv.cfg.keyboard_pinch_modifier_alt || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_in || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_in_alt || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_out || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_out_alt) && !gui.is_key_capture_dropped)
                 pinch_modifier(true);
 
             const float pinch_amount = 0.5;
-            if (event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_in && !gui.is_key_capture_dropped)
+            if ((event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_in || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_in_alt) && !gui.is_key_capture_dropped)
                 pinch_automove(pinch_amount * -1);
-            if (event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_out && !gui.is_key_capture_dropped)
+            if ((event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_out || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_out_alt) && !gui.is_key_capture_dropped)
                 pinch_automove(pinch_amount);
 #endif
             if (sce_ctrl_btn != 0) {
@@ -795,7 +791,7 @@ bool handle_events(EmuEnvState &emuenv, GuiState &gui) {
         }
         case SDL_EVENT_KEY_UP:
             gui.is_key_locked = false;
-            if (event.key.scancode == emuenv.cfg.keyboard_pinch_modifier || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_in || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_out) {
+            if (event.key.scancode == emuenv.cfg.keyboard_pinch_modifier || event.key.scancode == emuenv.cfg.keyboard_pinch_modifier_alt || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_in || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_in_alt || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_out || event.key.scancode == emuenv.cfg.keyboard_alternate_pinch_out_alt) {
                 pinch_modifier(false);
                 pinch_automove(0);
             }
@@ -813,7 +809,7 @@ bool handle_events(EmuEnvState &emuenv, GuiState &gui) {
             if (!emuenv.kernel.is_threads_paused() && (event.gbutton.button == SDL_GAMEPAD_BUTTON_TOUCHPAD))
                 toggle_touchscreen();
 
-            if (ImGui::GetIO().WantTextInput || emuenv.drop_inputs)
+            if (ImGui::GetIO().WantTextInput || gui.is_key_locked || emuenv.drop_inputs || (gui.gate_animation.state != GateAnimationState::None))
                 continue;
 
             for (const auto &binding : get_controller_bindings_ext(emuenv)) {
@@ -827,6 +823,10 @@ bool handle_events(EmuEnvState &emuenv, GuiState &gui) {
                     break;
                 }
             }
+            break;
+
+        case SDL_EVENT_GAMEPAD_BUTTON_UP:
+            gui.is_key_locked = false;
             break;
 
         case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:

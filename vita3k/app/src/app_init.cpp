@@ -400,7 +400,7 @@ bool init(EmuEnvState &state, Config &cfg, const Root &root_paths) {
     }
 
 #ifdef __ANDROID__
-    state.renderer->current_custom_driver = state.cfg.custom_driver_name;
+    state.renderer->current_custom_driver = state.cfg.current_config.custom_driver_name;
 #endif
 
 #if USE_DISCORD
@@ -425,14 +425,7 @@ bool late_init(EmuEnvState &state) {
         return false;
     }
 
-    const ResumeAudioThread resume_thread = [&state](SceUID thread_id) {
-        const auto thread = state.kernel.get_thread(thread_id);
-        const std::lock_guard<std::mutex> lock(thread->mutex);
-        if (thread->status == ThreadStatus::wait) {
-            thread->update_status(ThreadStatus::run);
-        }
-    };
-    if (!state.audio.init(resume_thread, state.cfg.audio_backend)) {
+    if (!state.audio.init(state.cfg.current_config.audio_backend)) {
         LOG_WARN("Failed to initialize audio! Audio will not work.");
     }
 

@@ -130,11 +130,11 @@ public:
     template <typename T>
     T MemoryRead(Dynarmic::A32::VAddr addr) {
         Ptr<T> ptr{ addr };
-        if (!ptr || !ptr.valid(*parent->mem) || ptr.address() < parent->mem->page_size) {
+        if (!ptr || !ptr.valid(*parent->mem) || ptr.address() < parent->mem->host_page_size) {
             LOG_ERROR("Invalid read of uint{}_t at address: 0x{:x}\n{}", sizeof(T) * 8, addr, this->cpu->save_context().description());
 
             auto pc = this->cpu->get_pc();
-            if (pc < parent->mem->page_size)
+            if (pc < parent->mem->host_page_size)
                 LOG_CRITICAL("PC is 0x{:x}", pc);
             else
                 LOG_ERROR("Executing: {}", disassemble(*parent, pc, nullptr));
@@ -167,11 +167,11 @@ public:
     template <typename T>
     void MemoryWrite(Dynarmic::A32::VAddr addr, T value) {
         Ptr<T> ptr{ addr };
-        if (!ptr || !ptr.valid(*parent->mem) || ptr.address() < parent->mem->page_size) {
+        if (!ptr || !ptr.valid(*parent->mem) || ptr.address() < parent->mem->host_page_size) {
             LOG_ERROR("Invalid write of uint{}_t at addr: 0x{:x}, val = 0x{:x}\n{}", sizeof(T) * 8, addr, value, this->cpu->save_context().description());
 
             auto pc = this->cpu->get_pc();
-            if (pc < parent->mem->page_size)
+            if (pc < parent->mem->host_page_size)
                 LOG_CRITICAL("PC is 0x{:x}", pc);
             else
                 LOG_ERROR("Executing: {}", disassemble(*parent, pc, nullptr));
@@ -203,11 +203,11 @@ public:
     template <typename T>
     bool MemoryWriteExclusive(Dynarmic::A32::VAddr addr, T value, T expected) {
         Ptr<T> ptr{ addr };
-        if (!ptr || !ptr.valid(*parent->mem) || ptr.address() < parent->mem->page_size) {
+        if (!ptr || !ptr.valid(*parent->mem) || ptr.address() < parent->mem->host_page_size) {
             LOG_ERROR("Invalid exclusive write of uint{}_t at addr: 0x{:x}, val = 0x{:x}, expected = 0x{:x}\n{}", sizeof(T) * 8, addr, value, expected, this->cpu->save_context().description());
 
             auto pc = this->cpu->get_pc();
-            if (pc < parent->mem->page_size)
+            if (pc < parent->mem->host_page_size)
                 LOG_CRITICAL("PC is 0x{:x}", pc);
             else
                 LOG_ERROR("Executing: {}", disassemble(*parent, pc, nullptr));
@@ -298,6 +298,8 @@ public:
     }
 };
 
+Dynarmic::ExclusiveMonitor DynarmicCPU::shared_monitor(MAX_CORE_COUNT);
+
 std::unique_ptr<Dynarmic::A32::Jit> DynarmicCPU::make_jit() {
     Dynarmic::A32::UserConfig config{};
     config.arch_version = Dynarmic::A32::ArchVersion::v7;
@@ -310,7 +312,7 @@ std::unique_ptr<Dynarmic::A32::Jit> DynarmicCPU::make_jit() {
     }
     config.hook_hint_instructions = true;
     config.enable_cycle_counting = false;
-    config.global_monitor = monitor;
+    config.global_monitor = &shared_monitor;
     config.coprocessors[15] = cp15;
     config.processor_id = core_id;
     config.optimizations = cpu_opt ? Dynarmic::all_safe_optimizations : Dynarmic::no_optimizations;
@@ -319,11 +321,10 @@ std::unique_ptr<Dynarmic::A32::Jit> DynarmicCPU::make_jit() {
     return std::make_unique<Dynarmic::A32::Jit>(config);
 }
 
-DynarmicCPU::DynarmicCPU(CPUState *state, std::size_t processor_id, Dynarmic::ExclusiveMonitor *monitor, bool cpu_opt)
+DynarmicCPU::DynarmicCPU(CPUState *state, std::size_t processor_id, bool cpu_opt)
     : parent(state)
     , cb(std::make_unique<ArmDynarmicCallback>(*state, *this))
     , cp15(std::make_shared<ArmDynarmicCP15>())
-    , monitor(monitor)
     , core_id(processor_id)
     , cpu_opt(cpu_opt) {
     jit = make_jit();
@@ -334,7 +335,6 @@ DynarmicCPU::~DynarmicCPU() = default;
 int DynarmicCPU::run() {
     halted = false;
     break_ = false;
-    exit_request = false;
     parent->svc_called = false;
     Dynarmic::HaltReason halt_reason;
     do {
@@ -384,7 +384,7 @@ bool DynarmicCPU::get_log_mem() {
 }
 
 void DynarmicCPU::stop() {
-    exit_request = true;
+    jit->HaltExecution();
 }
 
 uint32_t DynarmicCPU::get_reg(uint8_t idx) {
@@ -489,17 +489,6 @@ void DynarmicCPU::invalidate_jit_cache(Address start, size_t length) {
     jit->InvalidateCacheRange(start, length);
 }
 
-// TODO: proper abstraction
-ExclusiveMonitorPtr new_exclusive_monitor(int max_num_cores) {
-    return new Dynarmic::ExclusiveMonitor(max_num_cores);
-}
-
-void free_exclusive_monitor(ExclusiveMonitorPtr monitor) {
-    Dynarmic::ExclusiveMonitor *monitor_ = static_cast<Dynarmic::ExclusiveMonitor *>(monitor);
-    delete monitor_;
-}
-
-void clear_exclusive(ExclusiveMonitorPtr monitor, std::size_t core_num) {
-    Dynarmic::ExclusiveMonitor *monitor_ = static_cast<Dynarmic::ExclusiveMonitor *>(monitor);
-    monitor_->ClearProcessor(core_num);
+void DynarmicCPU::clear_exclusive() {
+    shared_monitor.ClearProcessor(core_id);
 }

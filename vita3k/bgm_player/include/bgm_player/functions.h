@@ -15,11 +15,19 @@
 // with this program; if not, write to the Free Software Foundation, Inc.,
 // 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 
-#include <module/read_arg.h>
-#include <module/vargs.h>
+#pragma once
 
-// Workaround for old Clang and GCC
-template <>
-module::vargs make_vargs(const LayoutArgsState &state) {
-    return module::vargs{ state };
-}
+#include <emuenv/state.h>
+#include <gui/state.h>
+
+namespace bgm_player {
+
+void destroy_bgm_player();
+bool init_bgm(GuiState &gui, EmuEnvState &emuenv);
+void init_bgm_player(const float vol);
+void set_bgm_volume(const float vol);
+void set_current_bgm_path(const std::pair<std::string, std::string> &path);
+void stop_bgm();
+void switch_bgm_state(const bool pause);
+
+} // namespace bgm_player

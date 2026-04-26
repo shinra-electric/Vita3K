@@ -153,6 +153,7 @@ static void init_style(EmuEnvState &emuenv) {
 
 static void init_font(GuiState &gui, EmuEnvState &emuenv) {
     ImGuiIO &io = ImGui::GetIO();
+    gui.fw_font = false;
 
     // Set Large Font
     constexpr ImWchar large_font_chars[] = { L'0', L'1', L'2', L'3', L'4', L'5', L'6', L'7', L'8', L'9', L':', L'A', L'M', L'P', 0 };
@@ -572,6 +573,12 @@ void save_apps_cache(GuiState &gui, EmuEnvState &emuenv) {
     }
 }
 
+static void init_app_custom_config(GuiState &gui, EmuEnvState &emuenv) {
+    for (auto &app : gui.app_selector.user_apps) {
+        app.custom_config = fs::exists(emuenv.config_path / "config" / fmt::format("config_{}.xml", app.path));
+    }
+}
+
 bool set_scroll_animation(float &scroll, float target_scroll, const std::string &target_id, std::function<void(float)> set_scroll) {
     // Persistent state for animation tracking (keeps values between frames)
     static float start_time = 0.f;
@@ -625,7 +632,7 @@ void init_home(GuiState &gui, EmuEnvState &emuenv) {
         if (!get_user_apps(gui, emuenv))
             init_user_apps(gui, emuenv);
     }
-
+    init_app_custom_config(gui, emuenv);
     init_app_background(gui, emuenv, "NPXS10015");
 
     regmgr::init_regmgr(emuenv.regmgr, emuenv.pref_path);
@@ -654,9 +661,15 @@ void init_user_app(GuiState &gui, EmuEnvState &emuenv, const std::string &app_pa
     get_app_param(gui, emuenv, app_path);
     init_app_icon(gui, emuenv, app_path);
 
-    const auto TIME_APP_INDEX = get_time_app_index(gui, emuenv, app_path);
-    if (TIME_APP_INDEX != gui.time_apps[emuenv.io.user_id].end())
-        get_app_index(gui, app_path)->last_time = TIME_APP_INDEX->last_time_used;
+    auto app = get_app_index(gui, app_path);
+    if (app) {
+        const auto TIME_APP_INDEX = get_time_app_index(gui, emuenv, app_path);
+        if (TIME_APP_INDEX != gui.time_apps[emuenv.io.user_id].end())
+            app->last_time = TIME_APP_INDEX->last_time_used;
+        else
+            app->last_time = 0;
+        app->custom_config = fs::exists(emuenv.config_path / "config" / fmt::format("config_{}.xml", app_path));
+    }
 
     gui.app_selector.is_app_list_sorted = false;
 }
@@ -828,10 +841,22 @@ void pre_init(GuiState &gui, EmuEnvState &emuenv) {
     assert(gui.imgui_state);
 
     init_style(emuenv);
-    init_font(gui, emuenv);
     lang::init_lang(gui.lang, emuenv);
 
-    bool result = ImGui_ImplSdl_CreateDeviceObjects(gui.imgui_state.get());
+    load_fonts(gui, emuenv, false);
+}
+
+void load_fonts(GuiState &gui, EmuEnvState &emuenv, bool reload) {
+    assert(gui.imgui_state);
+
+    if (reload) {
+        ImGui_ImplSdl_InvalidateDeviceObjects(gui.imgui_state.get());
+        ImGui::GetIO().Fonts->Clear();
+    }
+
+    init_font(gui, emuenv);
+
+    const bool result = ImGui_ImplSdl_CreateDeviceObjects(gui.imgui_state.get());
     assert(result);
 }
 
@@ -1050,10 +1075,45 @@ void ScrollWhenDragging() {
     ImGuiContext &g = *ImGui::GetCurrentContext();
     ImGuiIO &io = ImGui::GetIO();
     ImGuiWindow *window = g.CurrentWindow;
-    if (g.HoveredWindow == window && ImGui::IsMouseDragging(0)) {
-        ImGui::SetScrollY(window, window->Scroll.y - io.MouseDelta.y);
-        ImGui::SetActiveID(0, window);
+
+    static ImGuiID drag_scroll_window_id = 0;
+    static bool drag_scroll_active = false;
+
+    if (!io.MouseDown[ImGuiMouseButton_Left]) {
+        drag_scroll_active = false;
+        drag_scroll_window_id = 0;
+        return;
     }
+
+    if (g.HoveredWindow != window)
+        return;
+
+    const ImVec2 drag_delta = ImGui::GetMouseDragDelta(ImGuiMouseButton_Left);
+    const float abs_drag_x = fabsf(drag_delta.x);
+    const float abs_drag_y = fabsf(drag_delta.y);
+    const ImGuiID scroll_x_id = window->GetID("#SCROLLX");
+    const ImGuiID scroll_y_id = window->GetID("#SCROLLY");
+    const bool active_item_is_scrollbar = (g.ActiveId == scroll_x_id) || (g.ActiveId == scroll_y_id);
+
+    if (!drag_scroll_active) {
+        if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+            return;
+
+        if (abs_drag_y <= abs_drag_x)
+            return;
+
+        if ((g.ActiveId != 0) && (g.ActiveIdWindow == window) && active_item_is_scrollbar)
+            return;
+
+        drag_scroll_active = true;
+        drag_scroll_window_id = window->ID;
+
+        if (g.ActiveId != 0 && g.ActiveIdWindow == window)
+            ImGui::ClearActiveID();
+    } else if (drag_scroll_window_id != window->ID)
+        return;
+
+    ImGui::SetScrollY(window, window->Scroll.y - io.MouseDelta.y);
 }
 
 } // namespace ImGui

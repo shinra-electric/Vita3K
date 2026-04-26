@@ -17,8 +17,11 @@
 
 #include "private.h"
 
+#include <bgm_player/functions.h>
+
 #include <config/functions.h>
 #include <config/state.h>
+
 #include <dialog/state.h>
 #include <gui/functions.h>
 #include <host/dialog/filesystem.h>
@@ -266,7 +269,7 @@ void draw_settings(GuiState &gui, EmuEnvState &emuenv) {
     ImGui::Begin("##settings", &gui.vita_area.settings, ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings);
     ImGui::PopStyleVar();
 
-    const auto draw_list = ImGui::GetBackgroundDrawList();
+    const auto draw_list = ImGui::GetWindowDrawList();
     const ImVec2 BG_POS_MAX(VIEWPORT_POS.x + VIEWPORT_SIZE.x, VIEWPORT_POS.y + VIEWPORT_SIZE.y);
     if (is_background)
         draw_list->AddImage(gui.apps_background["NPXS10015"], VIEWPORT_POS, BG_POS_MAX);
@@ -381,7 +384,7 @@ void draw_settings(GuiState &gui, EmuEnvState &emuenv) {
         ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.62f, 0.75f, 0.62f, 0.8f));
         ImGui::SetCursorPos(ImVec2(SIZE_LIST.x - (106.f * SCALE.x), (SIZE_SELECT - (42.f * SCALE.y)) / 2.f));
         if (ImGui::Checkbox("##system_music", &gui.users[emuenv.io.user_id].system_music)) {
-            init_bgm(gui, emuenv);
+            bgm_player::init_bgm(gui, emuenv);
             save_user(gui, emuenv, emuenv.io.user_id);
         }
         ImGui::PopStyleColor(4);

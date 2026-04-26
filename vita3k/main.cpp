@@ -18,6 +18,7 @@
 #include "interface.h"
 
 #include <app/functions.h>
+#include <bgm_player/functions.h>
 #include <config/functions.h>
 #include <config/version.h>
 #include <dialog/state.h>
@@ -304,14 +305,35 @@ int main(int argc, char *argv[]) {
     init_libraries(emuenv);
 
     GuiState gui;
+
+    std::chrono::system_clock::time_point present = std::chrono::system_clock::now();
+    std::chrono::system_clock::time_point later = std::chrono::system_clock::now();
+    constexpr double frame_time = 1000.0 / 60.0;
+
+    const auto wait_for_frame_done = [&]() {
+        // get the current time & get the time we worked for
+        present = std::chrono::system_clock::now();
+        std::chrono::duration<double, std::milli> work_time = present - later;
+        // check if we are running faster than ~60fps (16.67ms)
+        if (work_time.count() < frame_time) {
+            // sleep for delta time.
+            std::chrono::duration<double, std::milli> delta_ms(frame_time - work_time.count());
+            auto delta_ms_duration = std::chrono::duration_cast<std::chrono::milliseconds>(delta_ms);
+            std::this_thread::sleep_for(std::chrono::milliseconds(delta_ms_duration.count()));
+        }
+        // save the later time
+        later = std::chrono::system_clock::now();
+    };
+
     if (!cfg.console) {
         gui::pre_init(gui, emuenv);
-        gui::init_bgm_player(emuenv.cfg.bgm_volume);
+        bgm_player::init_bgm_player(emuenv.cfg.bgm_volume);
         if (!emuenv.cfg.initial_setup) {
-            gui.current_path_bgm = { "pd0", "data/systembgm/initialsetup.at9" };
-            if (gui::init_bgm(gui, emuenv))
-                gui::switch_bgm_state(false);
+            emuenv.cfg.system_music.emplace(false);
+            if (bgm_player::init_bgm(gui, emuenv))
+                bgm_player::switch_bgm_state(true);
             while (!emuenv.cfg.initial_setup) {
+                wait_for_frame_done();
                 if (handle_events(emuenv, gui)) {
                     gui::draw_begin(gui, emuenv);
                     gui::draw_initial_setup(gui, emuenv);
@@ -320,7 +342,8 @@ int main(int argc, char *argv[]) {
                 } else
                     return QuitRequested;
             }
-            run_execv(argv, emuenv);
+            if (!gui.fw_font)
+                gui::load_fonts(gui, emuenv, true);
         }
         gui::init(gui, emuenv);
         app::update_viewport(emuenv);
@@ -367,25 +390,6 @@ int main(int argc, char *argv[]) {
         else if (emuenv.cfg.content_path.has_value())
             emuenv.cfg.content_path.reset();
     }
-
-    std::chrono::system_clock::time_point present = std::chrono::system_clock::now();
-    std::chrono::system_clock::time_point later = std::chrono::system_clock::now();
-    constexpr double frame_time = 1000.0 / 60.0;
-
-    auto wait_for_frame_done = [&]() {
-        // get the current time & get the time we worked for
-        present = std::chrono::system_clock::now();
-        std::chrono::duration<double, std::milli> work_time = present - later;
-        // check if we are running faster than ~60fps (16.67ms)
-        if (work_time.count() < frame_time) {
-            // sleep for delta time.
-            std::chrono::duration<double, std::milli> delta_ms(frame_time - work_time.count());
-            auto delta_ms_duration = std::chrono::duration_cast<std::chrono::milliseconds>(delta_ms);
-            std::this_thread::sleep_for(std::chrono::milliseconds(delta_ms_duration.count()));
-        }
-        // save the later time
-        later = std::chrono::system_clock::now();
-    };
 
     if (!cfg.console) {
 #if USE_DISCORD
@@ -467,7 +471,7 @@ int main(int argc, char *argv[]) {
         gui.imgui_state->do_clear_screen = false;
     }
 
-    gui::switch_bgm_state(true);
+    bgm_player::switch_bgm_state(true);
     gui::init_app_background(gui, emuenv, emuenv.io.app_path);
     gui::update_last_time_app_used(gui, emuenv, emuenv.io.app_path);
 

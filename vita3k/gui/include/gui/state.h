@@ -66,8 +66,9 @@ struct App {
     std::string title;
     std::string title_id;
     std::string path;
-    time_t last_time;
-    compat::CompatibilityState compat;
+    time_t last_time{};
+    compat::CompatibilityState compat = compat::UNKNOWN;
+    bool custom_config = false;
 };
 
 struct AppInfo {
@@ -186,7 +187,7 @@ struct User {
     std::string avatar = "default";
     gui::SortType sort_apps_type = gui::TITLE;
     gui::SortState sort_apps_state = gui::ASCENDANT;
-    bool system_music = true;
+    bool system_music = false;
     std::string theme_id = "default";
     bool use_theme_bg = true;
     std::string start_type = "default";
@@ -318,7 +319,6 @@ struct GuiState {
 
     std::map<std::string, std::vector<TimeApp>> time_apps;
 
-    std::pair<std::string, std::string> current_path_bgm;
     std::uint64_t current_theme_bg = 0;
     std::map<std::string, std::map<ThemePreviewType, ImGui_Texture>> themes_preview;
     std::vector<ImGui_Texture> theme_backgrounds;

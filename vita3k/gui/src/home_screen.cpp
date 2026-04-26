@@ -18,6 +18,7 @@
 #include "private.h"
 
 #include <app/functions.h>
+#include <bgm_player/functions.h>
 #include <compat/functions.h>
 #include <config/state.h>
 #include <ctrl/ctrl.h>
@@ -146,7 +147,7 @@ void pre_load_app(GuiState &gui, EmuEnvState &emuenv, bool live_area, const std:
 }
 
 void pre_run_app(GuiState &gui, EmuEnvState &emuenv, const std::string &app_path) {
-    switch_bgm_state(true);
+    bgm_player::switch_bgm_state(true);
     const auto is_sys = app_path.starts_with("NPXS") && (app_path != "NPXS10007");
     if (!is_sys) {
         if (emuenv.io.app_path != app_path) {
@@ -217,7 +218,7 @@ void close_system_app(GuiState &gui, EmuEnvState &emuenv) {
         gui.vita_area.home_screen = true;
     }
 
-    switch_bgm_state(false);
+    bgm_player::switch_bgm_state(false);
 }
 
 void close_and_run_new_app(EmuEnvState &emuenv, const std::string &app_path) {
@@ -562,7 +563,7 @@ void draw_home_screen(GuiState &gui, EmuEnvState &emuenv) {
                 gui.vita_area.home_screen = false;
                 gui.vita_area.information_bar = true;
                 gui.vita_area.start_screen = true;
-                switch_bgm_state(true);
+                bgm_player::switch_bgm_state(true);
             }
         }
     }
@@ -865,8 +866,7 @@ void draw_home_screen(GuiState &gui, EmuEnvState &emuenv) {
                 }
 
                 // Draw the custom config button
-                const auto IS_CUSTOM_CONFIG = fs::exists(emuenv.config_path / "config" / fmt::format("config_{}.xml", app.path));
-                if (IS_CUSTOM_CONFIG) {
+                if (app.custom_config) {
                     if (emuenv.cfg.apps_list_grid)
                         ImGui::SetCursorPosX(GRID_ICON_POS);
                     ImGui::SetCursorPosY(POS_ICON.y + ICON_SIZE.y - ImGui::GetFontSize() - (7.8f * emuenv.manual_dpi_scale));
