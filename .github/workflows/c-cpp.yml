@@ -130,7 +130,7 @@ jobs:
           vcpkg install boost-system boost-filesystem boost-program-options boost-icl boost-variant openssl zlib --triplet=${{ matrix.vcpkg_triplet }}
         if: matrix.os == 'android'
 
-      - uses: hendrikmuhs/ccache-action@v1.2
+      - uses: hendrikmuhs/ccache-action@v1.2.23
         if: matrix.os == 'android'
 
       - uses: mozilla-actions/sccache-action@v0.0.10
