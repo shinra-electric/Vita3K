@@ -119,7 +119,7 @@ jobs:
           vcpkg install zlib boost-system boost-filesystem boost-program-options boost-icl boost-variant curl openssl --triplet=${{ matrix.vcpkg_triplet }}
         if: startsWith(matrix.os, 'windows')
 
-      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: TheMrMilchmann/setup-msvc-dev@v4
         with:
           arch: ${{ matrix.arch }}
         if: startsWith(matrix.os, 'windows')
